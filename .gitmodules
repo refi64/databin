@@ -1,0 +1,3 @@
+[submodule "libcut"]
+	path = libcut
+	url = https://github.com/refi64/libcut.git
