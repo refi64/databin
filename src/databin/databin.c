@@ -71,10 +71,16 @@ void databin_io_close(databin_io *io) {
   destroy(io);
 }
 
+void databin_io_closep(databin_io **io) {
+  if (*io != NULL) {
+    databin_io_close(*io);
+    *io = NULL;
+  }
+}
+
 struct databin {
   databin_io *io;
   databin_type peek;
-  databin_len partial_string_len;
 };
 
 databin *databin_new(databin_io *io) {
@@ -129,7 +135,6 @@ int databin_peek_type(databin *bin, databin_type *type) {
 static uint16_t get_type_size(databin_type type) {
   switch (type) {
   case DATABIN_ANY:
-  case DATABIN_STRING:
     return UINT16_MAX;
   case DATABIN_CONTAINER:
   case DATABIN_CONTAINER_CLOSE:
@@ -146,51 +151,26 @@ static uint16_t get_type_size(databin_type type) {
   case DATABIN_INT64:
   case DATABIN_UINT64:
   case DATABIN_FLOAT64:
+  case DATABIN_STRING:
     return 8;
   }
 }
 
 int databin_append(databin *bin, databin_key key, const void *value, databin_type type) {
-  uint16_t size;
   int rc;
 
-  if (type == DATABIN_STRING) {
-    const databin_string *string = value;
-    size = string->len;
-    value = &string->c;
-  } else if (type == DATABIN_PARTIAL_STRING_JUST_LEN) {
-    bin->partial_string_len = *(databin_len *)value;
-    size = 2;
-  } else if (type == DATABIN_PARTIAL_STRING_JUST_STRING) {
-    size = bin->partial_string_len;
-    bin->partial_string_len = 0;
-  } else {
-    size = get_type_size(type);
-    if (size == UINT16_MAX) {
-      return -EINVAL;
-    }
+  uint16_t size = get_type_size(type);
+  if (size == UINT16_MAX) {
+    return -EINVAL;
   }
 
-  if (type != DATABIN_PARTIAL_STRING_JUST_STRING) {
-    uint8_t header[3];
-    header[0] = (uint8_t)type;
-    *((uint16_t *)&header[1]) = key;
+  uint8_t header[3];
+  header[0] = (uint8_t)type;
+  *((uint16_t *)&header[1]) = key;
 
-    if (header[0] == DATABIN_PARTIAL_STRING_JUST_LEN) {
-      header[0] = DATABIN_STRING;
-    }
-
-    rc = bin->io->write(bin->io, header, sizeof(header));
-    if (rc < 0) {
-      return rc;
-    }
-  }
-
-  if (type == DATABIN_STRING) {
-    rc = bin->io->write(bin->io, &size, sizeof(size));
-    if (rc < 0) {
-      return rc;
-    }
+  rc = bin->io->write(bin->io, header, sizeof(header));
+  if (rc < 0) {
+    return rc;
   }
 
   if (size != 0) {
@@ -204,79 +184,53 @@ int databin_append(databin *bin, databin_key key, const void *value, databin_typ
   return 0;
 }
 
-/* static int bin_read(databin *bin, size_t size, void *buffer) { */
-/*   if (size == 0) { */
-/*     return 0; */
-/*   } */
+int databin_append_continue_string(databin *bin, const char *value, size_t size) {
+  return bin->io->write(bin->io, value, size);
+}
 
-/*   if (buffer != NULL) { */
-/*     if (fread(buffer, size, 1, bin->fp) != 1) { */
-/*       return feof(bin->fp) ? -EINVAL : -errno; */
-/*     } */
-/*   } else { */
-/*     if (fseek(bin->fp, size, SEEK_CUR) == -1) { */
-/*       return -errno; */
-/*     } */
-/*   } */
-
-/*   return 1; */
-/* } */
-
-int databin_read(databin *bin, databin_key *key, void *value, databin_type type)
-{
+int databin_read(databin *bin, databin_key *key, void *value, databin_type type) {
   int rc;
 
-  if (type != DATABIN_PARTIAL_STRING_JUST_STRING) {
-    databin_type actual_type;
-    rc = databin_peek_type(bin, &actual_type);
-    if (rc < 0) {
-      return rc;
-    } else if ((type != DATABIN_PARTIAL_STRING_JUST_LEN || type == DATABIN_STRING) &&
-               actual_type != type) {
-      return -EINVAL;
-    }
-
-    rc = bin->io->read(bin->io, key, sizeof(*key));
-    /* rc = bin_read(bin, sizeof(uint16_t), key); */
-    if (rc < 0) {
-      return rc;
-    }
+  databin_type actual_type;
+  rc = databin_peek_type(bin, &actual_type);
+  if (rc < 0) {
+    return rc;
+  } else if (actual_type != type) {
+    return -EINVAL;
   }
 
-  databin_len size;
-  if (type == DATABIN_PARTIAL_STRING_JUST_LEN) {
-    size = 2;
-  } else if (type == DATABIN_PARTIAL_STRING_JUST_STRING) {
-    size = bin->partial_string_len;
-    bin->partial_string_len = 0;
-  } else if (type == DATABIN_STRING) {
-    rc = bin->io->read(bin->io, &size, sizeof(size));
-    /* rc = bin_read(bin, sizeof(databin_len), &size); */
-    if (rc < 0) {
-      return rc;
-    }
-
-    if (value != NULL) {
-      databin_string *string = value;
-      string->len = size;
-      value = &string->c;
-    }
-  } else {
-    size = get_type_size(type);
-  }
-
-  rc = bin->io->read(bin->io, value, size);
-  /* rc = bin_read(bin, size, value); */
+  rc = bin->io->read(bin->io, key, sizeof(*key));
   if (rc < 0) {
     return rc;
   }
 
-  if (type == DATABIN_PARTIAL_STRING_JUST_LEN) {
-    bin->partial_string_len = *(databin_len *)value;
+  databin_len size = get_type_size(type);
+
+  if (type == DATABIN_STRING && value == NULL) {
+    databin_len len;
+
+    rc = bin->io->read(bin->io, &len, size);
+    if (rc < 0) {
+      return rc;
+    }
+
+    rc = bin->io->read(bin->io, NULL, len);
+    if (rc < 0) {
+      return rc;
+    }
+  } else {
+    rc = bin->io->read(bin->io, value, size);
+    if (rc < 0) {
+      return rc;
+    }
   }
 
   bin->peek = '\0';
   return 1;
+}
+
+int databin_read_continue_string(databin *bin, char *value, size_t size) {
+  return bin->io->read(bin->io, value, size);
 }
 
 int databin_append_string(databin *bin, databin_key key, const char *value, databin_len len) {
@@ -286,12 +240,12 @@ int databin_append_string(databin *bin, databin_key key, const char *value, data
 
   int rc;
 
-  rc = databin_append(bin, key, &len, DATABIN_PARTIAL_STRING_JUST_LEN);
+  rc = databin_append(bin, key, &len, DATABIN_STRING);
   if (rc < 0) {
     return rc;
   }
 
-  return databin_append(bin, 0, value, DATABIN_PARTIAL_STRING_JUST_STRING);
+  return databin_append_continue_string(bin, value, len);
 }
 
 int databin_read_string(databin *bin, databin_key *key, char **value, databin_len *len) {
@@ -301,7 +255,7 @@ int databin_read_string(databin *bin, databin_key *key, char **value, databin_le
     len = alloca(sizeof(databin_len));
   }
 
-  rc = databin_read(bin, key, len, DATABIN_PARTIAL_STRING_JUST_LEN);
+  rc = databin_read(bin, key, len, DATABIN_STRING);
   if (rc < 0) {
     return rc;
   }
@@ -310,8 +264,7 @@ int databin_read_string(databin *bin, databin_key *key, char **value, databin_le
     *value = malloc(*len);
   }
 
-  return databin_read(bin, NULL, value != NULL ? *value : NULL,
-                      DATABIN_PARTIAL_STRING_JUST_STRING);
+  return databin_read_continue_string(bin, value != NULL ? *value : NULL, *len);
 }
 
 int databin_append_value(databin *bin, databin_key key, const databin_value *value) {

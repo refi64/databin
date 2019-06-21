@@ -57,10 +57,10 @@ LIBCUT_TEST(test_databin) {
   TEST_SUCCESS(databin_close_container(bin));
   TEST_SUCCESS(databin_open_container(bin, KEY_STRINGS));
 
-  databin_string *s1 = alloca(sizeof(databin_string) + 3);
-  s1->len = 4;
-  strcpy(&s1->c, "abc");
-  TEST_SUCCESS(databin_append(bin, KEY_S1, s1, DATABIN_STRING));
+  char s1[4] = "abc";
+  databin_len s1_len = sizeof(s1);
+  TEST_SUCCESS(databin_append(bin, KEY_S1, &s1_len, DATABIN_STRING));
+  TEST_SUCCESS(databin_append_continue_string(bin, s1, s1_len));
   TEST_SUCCESS(databin_append_string(bin, KEY_S2, "abc123", DATABIN_STRING_LEN_AUTO));
 
   TEST_SUCCESS(databin_close_container(bin));
@@ -98,10 +98,11 @@ LIBCUT_TEST(test_databin) {
   TEST_SUCCESS(databin_enter_container(bin, &key));
   LIBCUT_TEST_EQ((int)key, KEY_STRINGS);
 
-  TEST_SUCCESS(databin_read(bin, &key, s1, DATABIN_STRING));
+  TEST_SUCCESS(databin_read(bin, &key, &s1_len, DATABIN_STRING));
+  TEST_SUCCESS(databin_read_continue_string(bin, s1, s1_len));
   LIBCUT_TEST_EQ((int)key, KEY_S1);
-  LIBCUT_TEST_EQ((int)s1->len, 4);
-  LIBCUT_TEST_STREQ(&s1->c, "abc");
+  LIBCUT_TEST_EQ((int)s1_len, 4);
+  LIBCUT_TEST_STREQ(s1, "abc");
 
   cleanup_free char *s2 = NULL;
   databin_len s2_len;

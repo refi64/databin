@@ -17,7 +17,7 @@ typedef struct databin_fd_io databin_fd_io;
 typedef struct databin_buffer_io databin_buffer_io;
 
 typedef struct databin databin;
-typedef struct databin_string databin_string;
+typedef struct databin_string_holder databin_string_holder;
 typedef struct databin_value databin_value;
 typedef enum databin_type databin_type;
 
@@ -52,22 +52,16 @@ enum databin_type {
 
 #define DATABIN_STRING_LEN_AUTO ((databin_len) 0)
 
-#define DATABIN_PARTIAL_STRING_JUST_LEN ((databin_type) 'L')
-#define DATABIN_PARTIAL_STRING_JUST_STRING ((databin_type) 'S')
-
-struct __attribute__((__packed__)) databin_string {
+struct databin_string_holder {
   databin_len len;
-  char c;
+  char *buffer;
 };
 
 struct databin_value {
   databin_type type;
 
   union {
-    struct {
-      char *buffer;
-      databin_len len;
-    } string;
+    databin_string_holder string;
 
     int8_t byte;
 
@@ -90,7 +84,9 @@ void databin_close(databin *bin);
 int databin_peek_type(databin *bin, databin_type *type);
 
 int databin_append(databin *bin, databin_key key, const void *value, databin_type type);
+int databin_append_continue_string(databin *bin, const char *value, size_t size);
 int databin_read(databin *bin, databin_key *key, void *value, databin_type type);
+int databin_read_continue_string(databin *bin, char *value, size_t size);
 
 int databin_append_string(databin *bin, databin_key key, const char *value, databin_len len);
 int databin_read_string(databin *bin, databin_key *key, char **value, databin_len *len);
