@@ -79,7 +79,7 @@ struct databin_value {
 
 databin *databin_new(databin_io *io);
 void databin_close(databin *bin);
-/* void databin_closep(databin **bin); */
+void databin_closep(databin **bin);
 
 int databin_peek_type(databin *bin, databin_type *type);
 

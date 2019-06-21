@@ -97,6 +97,13 @@ void databin_close(databin *bin) {
   free(bin);
 }
 
+void databin_closep(databin **bin) {
+  if (*bin != NULL) {
+    databin_close(*bin);
+    *bin = NULL;
+  }
+}
+
 int databin_peek_type(databin *bin, databin_type *type) {
   if (bin->peek == '\0') {
     char c;
